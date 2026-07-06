@@ -17,6 +17,8 @@ import math
 import os
 import tempfile
 import unittest
+import json
+import pytest
 
 import weatherrouting
 
@@ -50,18 +52,19 @@ class TestPolar(unittest.TestCase):
         self.assertEqual(self.polar_obj.to_string(), d)
 
     def test_get_speed(self):
-        self.assertAlmostEqual(
-            self.polar_obj.get_speed(8, math.radians(60)), 6.1, delta=0.001
+        ref_data_path = os.path.join(
+            os.path.dirname(__file__), "data/polar_get_speed_reference.json"
         )
-        self.assertAlmostEqual(
-            self.polar_obj.get_speed(8.3, math.radians(60)), 6.205, delta=0.001
-        )
-        self.assertAlmostEqual(
-            self.polar_obj.get_speed(8.3, math.radians(64)), 6.279, delta=0.001
-        )
-        self.assertAlmostEqual(
-            self.polar_obj.get_speed(2.2, math.radians(170)), 1.1, delta=0.001
-        )
+
+        with open(ref_data_path, "r") as f:
+            ref_data = json.load(f)
+
+        for row in ref_data["samples"]:
+            assert self.polar_obj.get_speed(row["tws"], row["twa"]) == pytest.approx(
+                row["speed"],
+                rel=1e-12,
+                abs=1e-12,
+            )
 
     def test_routage(self):
         self.assertAlmostEqual(
