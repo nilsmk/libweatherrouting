@@ -53,28 +53,46 @@ def ortodromic2(
     return (EARTH_RADIUS * c, a)
 
 
+EARTH_RADIUS_KM = 6371.0088
+EARTH_RADIUS_NM = 3440.065
+_DEG2RAD = math.pi / 180.0
+_RAD2DEG = 180.0 / math.pi
+
+
 def ortodromic(
     lat_a: float, lon_a: float, lat_b: float, lon_b: float
 ) -> Tuple[float, float]:
-    """Returns the ortodromic distance in km between A and B"""
-    # g = geod.Inverse(lat_a, lon_a, lat_b, lon_b)
-    # return (g['s12'] * 1e-3, math.radians (g['azi1']))
+    """Returns the ortodromic distance in km and initial heading in radians between A and B"""
+    phi1 = lat_a * _DEG2RAD
+    phi2 = lat_b * _DEG2RAD
+    dphi = phi2 - phi1
+    dlam = (lon_b - lon_a) * _DEG2RAD
+    a = math.sin(dphi * 0.5) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam * 0.5) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+    dist_km = EARTH_RADIUS_KM * c
 
-    p1 = latlon.LatLon(latlon.Latitude(lat_a), latlon.Longitude(lon_a))
-    p2 = latlon.LatLon(latlon.Latitude(lat_b), latlon.Longitude(lon_b))
-    return (p1.distance(p2), math.radians(p1.heading_initial(p2)))
+    y = math.sin(dlam) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlam)
+    hdg = math.atan2(y, x)
+    return (dist_km, hdg)
 
 
 def lossodromic(
     lat_a: float, lon_a: float, lat_b: float, lon_b: float
 ) -> Tuple[float, float]:
-    """Returns the lossodromic distance in km between A and B"""
-    # g = geod.Inverse(lat_a, lon_a, lat_b, lon_b)
-    # return (g['s12'] * 1e-3, math.radians (g['azi1']))
-
-    p1 = latlon.LatLon(latlon.Latitude(lat_a), latlon.Longitude(lon_a))
-    p2 = latlon.LatLon(latlon.Latitude(lat_b), latlon.Longitude(lon_b))
-    return (p1.distance(p2, ellipse="sphere"), math.radians(p1.heading_initial(p2)))
+    """Returns the lossodromic (rhumb line) distance in km and heading in radians between A and B"""
+    phi1 = lat_a * _DEG2RAD
+    phi2 = lat_b * _DEG2RAD
+    dphi = phi2 - phi1
+    dlam = (lon_b - lon_a) * _DEG2RAD
+    
+    t1 = math.tan(math.pi * 0.25 + phi1 * 0.5)
+    t2 = math.tan(math.pi * 0.25 + phi2 * 0.5)
+    dpsi = math.log(max(1e-12, t2 / max(1e-12, t1))) if abs(dphi) > 1e-12 else 0.0
+    q = dphi / dpsi if abs(dpsi) > 1e-12 else math.cos(phi1)
+    d = math.sqrt(dphi * dphi + q * q * dlam * dlam) * EARTH_RADIUS_KM
+    brg = math.atan2(dlam, dpsi)
+    return (d, brg)
 
 
 def km2nm(d: float) -> float:
@@ -88,39 +106,42 @@ def nm2km(d: float) -> float:
 def point_distance(
     lat_a: float, lon_a: float, lat_b: float, lon_b: float, unit: str = "nm"
 ) -> float:
-    """Returns the distance between two geo points"""
-    p1 = latlon.LatLon(latlon.Latitude(lat_a), latlon.Longitude(lon_a))
-    p2 = latlon.LatLon(latlon.Latitude(lat_b), latlon.Longitude(lon_b))
-    d = p1.distance(p2)
-
-    # d = ortodromic(lat_a, lon_a, lat_b, lon_b)[0]
-
-    if unit == "nm":
-        return km2nm(d)
-    else:  # if unit == "km":
-        return d
+    """Returns the distance between two geo points (Haversine formula)"""
+    phi1 = lat_a * _DEG2RAD
+    phi2 = lat_b * _DEG2RAD
+    dphi = phi2 - phi1
+    dlam = (lon_b - lon_a) * _DEG2RAD
+    a = math.sin(dphi * 0.5) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam * 0.5) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+    r = EARTH_RADIUS_NM if unit == "nm" else EARTH_RADIUS_KM
+    return r * c
 
 
 def routage_point_distance(
     lat_a: float, lon_a: float, distance: float, hdg: float, unit: str = "nm"
 ) -> Tuple[float, float]:
-    """Returns the point from (lat_a, lon_a) to the given (distance, hdg)"""
-    if unit == "nm":
-        d = nm2km(distance)
-    elif unit == "km":
-        d = distance
+    """Returns the destination point from (lat_a, lon_a) given (distance, hdg)"""
+    d_nm = distance if unit == "nm" else km2nm(distance)
+    d_rad = d_nm / EARTH_RADIUS_NM
+    phi1 = lat_a * _DEG2RAD
+    lam1 = lon_a * _DEG2RAD
+    sin_phi1 = math.sin(phi1)
+    cos_phi1 = math.cos(phi1)
+    sin_d = math.sin(d_rad)
+    cos_d = math.cos(d_rad)
+    sin_hdg = math.sin(hdg)
+    cos_hdg = math.cos(hdg)
 
-    # g = geod.Direct(lat_a, lon_a, math.degrees(hdg), d * 1e3)
-    # return (g['lat2'], g['lon2'])
-
-    p = latlon.LatLon(latlon.Latitude(lat_a), latlon.Longitude(lon_a))
-    of = p.offset(math.degrees(hdg), d).to_string("D")
-    return (float(of[0]), float(of[1]))
+    sin_phi2 = sin_phi1 * cos_d + cos_phi1 * sin_d * cos_hdg
+    phi2 = math.asin(max(-1.0, min(1.0, sin_phi2)))
+    y = sin_hdg * sin_d * cos_phi1
+    x = cos_d - sin_phi1 * sin_phi2
+    lam2 = lam1 + math.atan2(y, x)
+    return (phi2 * _RAD2DEG, (lam2 * _RAD2DEG + 540.0) % 360.0 - 180.0)
 
 
 def max_reach_distance(p, speed: float, dt: float = (1.0 / 60.0 * 60.0)) -> float:
-    maxp = routage_point_distance(p[0], p[1], speed * dt, 1)
-    return point_distance(p[0], p[1], maxp[0], maxp[1])
+    return speed * dt
 
 
 def reduce360(alfa: float) -> float:

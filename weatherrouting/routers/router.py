@@ -267,88 +267,80 @@ class Router:
     def _calculate_isochrones(  # noqa: C901
         self, t, dt, isocrone, nextwp, point_f, subdiv
     ):
-        """Calcuates isochrones based on pointF next point calculation"""
+        """Calculates isochrones based on pointF next point calculation"""
         last = isocrone[-1]
+        origin = isocrone[0][0].pos
+        bearing = {}
 
-        newisopoints = []
-
-        def _calculate_iso_points(i):
-            last = isocrone[-1]
-            cisos = []
+        for i in range(0, len(last)):
             p = last[i]
-
             try:
                 (twd, tws) = self.grib.get_wind_at(t, p.pos[0], p.pos[1])
             except Exception as e:
                 raise RoutingNoWindError() from e
 
-            twd = math.radians(twd)
-            tws = utils.ms_to_knots(tws)
+            twd_rad = math.radians(twd)
+            tws_kt = utils.ms_to_knots(tws)
 
             for twa in range(-180, 180, 5):
-                twa = math.radians(twa)
-                brg = utils.reduce360(twd + twa)
+                twa_rad = math.radians(twa)
+                brg = utils.reduce360(twd_rad + twa_rad)
 
                 # Calculate next point
-                ptoiso, speed = point_f(p.pos, tws, twa, dt, brg)
+                ptoiso, speed = point_f(p.pos, tws_kt, twa_rad, dt, brg)
 
                 nextwpdist = utils.point_distance(
                     ptoiso[0], ptoiso[1], nextwp[0], nextwp[1]
                 )
-                startwplos = isocrone[0][0].lossodromic((ptoiso[0], ptoiso[1]))
-
                 if nextwpdist > p.next_wp_dist:
                     continue
 
-                # if self.point_validity:
-                # 	if not self.point_validity (ptoiso[0], ptoiso[1]):
-                # 		continue
-                # if self.line_validity:
-                # 	if not self.line_validity (ptoiso[0], ptoiso[1], p.pos[0], p.pos[1]):
-                # 		continue
+                startwplos = utils.lossodromic(origin[0], origin[1], ptoiso[0], ptoiso[1])
+                k = int(math.degrees(startwplos[1]) / subdiv)
 
-                cisos.append(
-                    IsoPoint(
+                if k in bearing:
+                    if nextwpdist < bearing[k][7]:
+                        bearing[k] = (
+                            (ptoiso[0], ptoiso[1]),
+                            i,
+                            t,
+                            twd_rad,
+                            tws_kt,
+                            speed,
+                            math.degrees(brg),
+                            nextwpdist,
+                            startwplos,
+                        )
+                else:
+                    bearing[k] = (
                         (ptoiso[0], ptoiso[1]),
                         i,
                         t,
-                        twd,
-                        tws,
+                        twd_rad,
+                        tws_kt,
                         speed,
                         math.degrees(brg),
                         nextwpdist,
                         startwplos,
                     )
-                )
 
-            return cisos
+        # Instantiate IsoPoint only for sector winners
+        pruned_points = [
+            IsoPoint(
+                pos=item[0],
+                prev_idx=item[1],
+                time=item[2],
+                twd=item[3],
+                tws=item[4],
+                speed=item[5],
+                brg=item[6],
+                next_wp_dist=item[7],
+                start_wp_los=item[8],
+            )
+            for item in bearing.values()
+        ]
 
-        # foreach point of the iso
-
-        if self.get_param_value("concurrent"):
-            executor = ThreadPoolExecutor()
-            for x in executor.map(_calculate_iso_points, range(0, len(last))):
-                newisopoints.extend(x)
-
-            executor.shutdown()
-        else:
-            for i in range(0, len(last)):
-                newisopoints += _calculate_iso_points(i)
-
-        newisopoints = sorted(newisopoints, key=(lambda a: a.start_wp_los[1]))
-
-        # Remove slow isopoints inside
-        bearing = {}
-        for x in newisopoints:
-            k = str(int(math.degrees(x.start_wp_los[1]) / subdiv))
-
-            if k in bearing:
-                if x.next_wp_dist < bearing[k].next_wp_dist:
-                    bearing[k] = x
-            else:
-                bearing[k] = x
-
-        isonew = self._filter_validity(list(bearing.values()), last)
+        isonew = self._filter_validity(pruned_points, last)
         isonew = sorted(isonew, key=(lambda a: a.start_wp_los[1]))
         isocrone.append(isonew)
 
