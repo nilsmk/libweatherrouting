@@ -96,13 +96,16 @@ class LinearBestIsoRouter(Router):
         # out of grib scope
         else:
             min_dist = 1000000
-            isoc = lastlog.isochrones
-            for p in isoc[-1]:
-                check_dist = p.point_distance(end)
-                if check_dist < min_dist:
-                    min_dist = check_dist
-                    min_p = p
-            generate_path(min_p)
+            isoc = lastlog.isochrones if lastlog is not None else []
+            min_p = None
+            if isoc and len(isoc) > 0 and len(isoc[-1]) > 0:
+                for p in isoc[-1]:
+                    check_dist = p.point_distance(end)
+                    if check_dist < min_dist:
+                        min_dist = check_dist
+                        min_p = p
+            if min_p is not None:
+                generate_path(min_p)
 
         return RoutingResult(
             time=time + datetime.timedelta(hours=timedelta),
